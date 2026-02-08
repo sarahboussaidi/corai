@@ -59,7 +59,7 @@ const getSmoothedPrediction = (newPrediction: string): string => {
 
 const recognizeWithGemini = async (imageBlob: Blob): Promise<string> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
     
     const base64Data = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -97,7 +97,7 @@ const recognizeWithGemini = async (imageBlob: Blob): Promise<string> => {
 };
 
 export const detectSign = async (imageBlob: Blob): Promise<string> => {
-  const apiKey = process.env.API_KEY || "";
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
   const isHuggingFaceKey = apiKey.startsWith("hf_");
   
   let rawResult = "";
