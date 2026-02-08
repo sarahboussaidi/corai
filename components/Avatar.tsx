@@ -1,167 +1,302 @@
 
-import React from 'react';
-import { SignPose } from '../types';
+import React, { useEffect, useState } from 'react';
+import { SignPose, Euler } from '../types';
 import { DEFAULT_POSE } from '../constants';
 
 interface AvatarProps {
   currentPose: SignPose;
 }
 
+// --- CONFIGURATION ---
+const SIZES = {
+  head: { w: 100, h: 110 },
+  torso: { w: 140, h: 160 },
+  upperArm: { w: 32, len: 90 },
+  lowerArm: { w: 28, len: 85 },
+  hand: { w: 28, h: 32 },
+  neck: { w: 30, h: 30 }
+};
+
+const COLORS = {
+  skin: '#F3D2C1',
+  skinDark: '#E0B090', // for joints/shadows
+  shirt: '#4338CA', // Indigo 700
+  shirtLight: '#4F46E5', // Indigo 600
+  hair: '#291811',
+  lips: '#C07878',
+  eye: '#1E1B4B'
+};
+
 const Avatar: React.FC<AvatarProps> = ({ currentPose = DEFAULT_POSE }) => {
-  
-  const renderHand = (state: string, color: string, isLeft: boolean) => {
-    const sideMult = isLeft ? 1 : -1;
-    switch(state) {
-      case 'fist':
-        return (
-          <g>
-            <circle r="9" fill={color} />
-            <path d="M-5 -5 Q0 -10 5 -5" stroke="rgba(0,0,0,0.15)" fill="none" strokeWidth="1" />
-          </g>
-        );
-      case 'point':
-        return (
-          <g>
-            <circle r="8" fill={color} />
-            {/* The index finger is vital for TSL "Tounes" or pointing */}
-            <rect x="-2" y="-18" width="4.5" height="15" rx="2.5" fill={color} />
-            {/* Thumb tucked variant */}
-            <path d={`M${sideMult * 5} 0 Q${sideMult * 10} 5 ${sideMult * 5} 10`} stroke="rgba(0,0,0,0.15)" fill="none" strokeWidth="1.5" />
-          </g>
-        );
-      case 'spread':
-        return (
-          <g>
-            <circle r="8" fill={color} />
-            {[...Array(5)].map((_, i) => (
-              <rect 
-                key={i} 
-                x="-1.5" 
-                y="-17" 
-                width="3.5" 
-                height="14" 
-                rx="1.5" 
-                fill={color} 
-                style={{ 
-                  transform: `rotate(${(i-2)*24}deg)`, 
-                  transformOrigin: 'bottom center',
-                  transition: 'transform 0.2s ease-out'
-                }} 
-              />
-            ))}
-          </g>
-        );
-      default: // flat (Palm)
-        return (
-          <g>
-            <rect x="-8" y="-12" width="16" height="22" rx="6" fill={color} />
-            <line x1="-3" y1="-9" x2="-3" y2="5" stroke="rgba(0,0,0,0.06)" strokeWidth="1" />
-            <line x1="1" y1="-10" x2="1" y2="6" stroke="rgba(0,0,0,0.06)" strokeWidth="1" />
-            <line x1="5" y1="-9" x2="5" y2="5" stroke="rgba(0,0,0,0.06)" strokeWidth="1" />
-          </g>
-        );
-    }
+  const [blink, setBlink] = useState(false);
+
+  useEffect(() => {
+    const blinkTimer = setInterval(() => {
+      setBlink(true);
+      setTimeout(() => setBlink(false), 150);
+    }, 4000 + Math.random() * 2000);
+    return () => clearInterval(blinkTimer);
+  }, []);
+
+  // --- KINEMATICS HELPER ---
+  const getRot = (rot: Euler) => `rotateX(${rot.x}deg) rotateY(${rot.y}deg) rotateZ(${rot.z}deg)`;
+
+  // --- SUB-COMPONENTS ---
+
+  // 1. DYNAMIC FACE SVG
+  const Face = () => (
+    <svg viewBox="0 0 100 110" className="w-full h-full overflow-visible">
+      {/* Base Head Shape */}
+      <rect x="0" y="0" width="100" height="110" rx="40" fill={COLORS.skin} />
+      
+      {/* Hair */}
+      <path d="M0 40 C0 10 10 0 50 0 C90 0 100 10 100 40 V50 H95 V30 C95 10 85 10 50 10 C15 10 5 10 5 30 V60 H0 V40 Z" fill={COLORS.hair} />
+      <path d="M0 30 C0 10 5 0 50 0 C95 0 100 10 100 30 V45 H0 V30 Z" fill={COLORS.hair} />
+      
+      {/* Ears (Behind) - rendered via CSS z-index usually, but here simple side ellipses */}
+      <ellipse cx="-5" cy="55" rx="8" ry="12" fill={COLORS.skinDark} />
+      <ellipse cx="105" cy="55" rx="8" ry="12" fill={COLORS.skinDark} />
+
+      {/* Eyebrows */}
+      <g transform={`translate(0, ${currentPose.expression === 'surprised' ? -5 : 0})`}>
+        <path d="M25 45 Q35 40 45 45" stroke={COLORS.hair} strokeWidth="4" strokeLinecap="round" fill="none" 
+              transform={currentPose.expression === 'angry' ? 'rotate(10, 35, 45)' : ''} />
+        <path d="M55 45 Q65 40 75 45" stroke={COLORS.hair} strokeWidth="4" strokeLinecap="round" fill="none"
+              transform={currentPose.expression === 'angry' ? 'rotate(-10, 65, 45)' : ''} />
+      </g>
+
+      {/* Eyes */}
+      {blink ? (
+        <g stroke={COLORS.eye} strokeWidth="3" strokeLinecap="round">
+          <line x1="28" y1="58" x2="42" y2="58" />
+          <line x1="58" y1="58" x2="72" y2="58" />
+        </g>
+      ) : (
+        <g fill={COLORS.eye}>
+          <circle cx="35" cy="58" r="5" />
+          <circle cx="65" cy="58" r="5" />
+          <circle cx="37" cy="56" r="1.5" fill="white" />
+          <circle cx="67" cy="56" r="1.5" fill="white" />
+        </g>
+      )}
+
+      {/* Nose */}
+      <path d="M50 65 L48 75 L52 75 Z" fill={COLORS.skinDark} opacity="0.5" />
+
+      {/* Mouth */}
+      <g transform="translate(50, 85)">
+        {currentPose.expression === 'smile' && <path d="M-12 -2 Q0 8 12 -2" fill="none" stroke={COLORS.lips} strokeWidth="3" strokeLinecap="round" />}
+        {currentPose.expression === 'sad' && <path d="M-12 4 Q0 -6 12 4" fill="none" stroke={COLORS.lips} strokeWidth="3" strokeLinecap="round" />}
+        {currentPose.expression === 'surprised' && <circle cx="0" cy="0" r="6" fill="none" stroke={COLORS.lips} strokeWidth="3" />}
+        {(currentPose.expression === 'neutral' || currentPose.expression === 'focus') && <line x1="-8" y1="0" x2="8" y2="0" stroke={COLORS.lips} strokeWidth="3" strokeLinecap="round" />}
+      </g>
+    </svg>
+  );
+
+  // 2. VECTOR HAND COMPONENT
+  const VectorHand = ({ state, isLeft }: { state: string, isLeft: boolean }) => {
+    // We render hands as SVGs for perfect scaling and shape
+    const flip = isLeft ? 'scale(-1, 1)' : '';
+    
+    // Hand Path Logic
+    let path = ""; 
+    // Flat / Default
+    path = "M4 30 L4 10 Q4 0 12 0 Q20 0 20 10 L20 30 Z M20 12 L24 14 L24 26 L20 28"; 
+    
+    // Simple state mapping to visual shapes using React composition
+    // Instead of complex paths, we build the hand from reliable primitives
+    
+    return (
+      <div style={{ width: SIZES.hand.w, height: SIZES.hand.h, transform: flip }}>
+        <div style={{ 
+          width: '100%', height: '100%', 
+          background: COLORS.skin, 
+          borderRadius: '8px 8px 12px 12px',
+          position: 'relative',
+          boxShadow: 'inset 0 -2px 5px rgba(0,0,0,0.1)'
+        }}>
+           {/* Thumb */}
+           <div style={{
+             position: 'absolute', top: 12, left: -6, width: 8, height: 16,
+             background: COLORS.skin, borderRadius: 4,
+             transformOrigin: 'top right',
+             transform: state === 'fist' ? 'rotate(-90deg) translate(-2px, -4px)' : 'rotate(-20deg)'
+           }} />
+           
+           {/* Fingers */}
+           <div style={{ position: 'absolute', top: -10, left: 2, display: 'flex', gap: '2px' }}>
+              {/* Index */}
+              <div style={{ 
+                width: 5, height: (state === 'fist' || state === 'o-shape') ? 12 : 22, 
+                background: COLORS.skin, borderRadius: 3, 
+                transform: state === 'point' ? 'translateY(-2px)' : 'translateY(0)',
+                transition: 'all 0.2s'
+              }} />
+              {/* Middle */}
+              <div style={{ 
+                width: 5, height: (state === 'fist' || state === 'point' || state === 'o-shape') ? 12 : 24, 
+                background: COLORS.skin, borderRadius: 3,
+                transition: 'all 0.2s'
+              }} />
+              {/* Ring */}
+              <div style={{ 
+                width: 5, height: (state === 'fist' || state === 'point' || state === 'o-shape') ? 11 : 22, 
+                background: COLORS.skin, borderRadius: 3,
+                transition: 'all 0.2s'
+              }} />
+              {/* Pinky */}
+              <div style={{ 
+                width: 5, height: (state === 'fist' || state === 'point' || state === 'o-shape') ? 10 : 18, 
+                background: COLORS.skin, borderRadius: 3,
+                transition: 'all 0.2s'
+              }} />
+           </div>
+
+           {/* O-Shape Hole Visualization */}
+           {state === 'o-shape' && (
+             <div style={{
+               position: 'absolute', top: 0, left: 4, width: 14, height: 14,
+               border: `2px solid ${COLORS.skinDark}`, borderRadius: '50%'
+             }} />
+           )}
+        </div>
+      </div>
+    );
   };
 
-  return (
-    <div className="relative w-full h-[400px] flex items-center justify-center bg-white rounded-3xl shadow-inner border border-indigo-100 overflow-hidden bg-gradient-to-b from-indigo-50/30 to-white">
-      {/* Visual background grid for orientation */}
-      <div className="absolute inset-0 opacity-[0.03] pointer-events-none">
-        <svg width="100%" height="100%">
-          <defs>
-            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#4338ca" strokeWidth="1"/>
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" />
-        </svg>
-      </div>
-
-      <svg viewBox="0 0 200 240" className="w-full h-full relative z-10 drop-shadow-xl p-4">
-        {/* Torso */}
-        <path d="M55 145 Q100 130 145 145 L160 235 Q100 250 40 235 Z" fill="#2d2a7a" />
-        
-        {/* Neck */}
-        <rect x="85" y="120" width="30" height="30" rx="4" fill="#ffdbac" />
-
-        {/* Head Group */}
-        <g style={{ transform: currentPose.head, transformOrigin: '100px 110px', transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
-          {/* Face */}
-          <path d="M70 75 Q70 40 100 40 Q130 40 130 75 Q130 115 100 115 Q70 115 70 75" fill="#ffdbac" />
-          
-          {/* Facial Expressions */}
-          <g transform="translate(100, 85)">
-            {currentPose.expression === 'smile' && (
-               <path d="M-12 12 Q0 26 12 12" stroke="#4a3728" fill="none" strokeWidth="3" strokeLinecap="round" />
-            )}
-            {currentPose.expression === 'neutral' && (
-               <path d="M-8 16 L8 16" stroke="#4a3728" fill="none" strokeWidth="2.5" strokeLinecap="round" />
-            )}
-            {currentPose.expression === 'focus' && (
-               <g>
-                 <path d="M-8 14 Q0 12 8 14" stroke="#4a3728" fill="none" strokeWidth="2.5" strokeLinecap="round" />
-                 <path d="M-15 -18 L-5 -16" stroke="#4a3728" fill="none" strokeWidth="2" strokeLinecap="round" />
-                 <path d="M15 -18 L5 -16" stroke="#4a3728" fill="none" strokeWidth="2" strokeLinecap="round" />
-               </g>
-            )}
-            {currentPose.expression === 'surprised' && (
-               <circle r="7" cy="14" stroke="#4a3728" fill="none" strokeWidth="2.5" />
-            )}
-            
-            {/* Eyes */}
-            <g transform="translate(-15, -10)">
-              <ellipse rx="4" ry="5" fill="#1e1b4b" />
-              <circle cx="-1" cy="-2" r="1.2" fill="white" />
-            </g>
-            <g transform="translate(15, -10)">
-              <ellipse rx="4" ry="5" fill="#1e1b4b" />
-              <circle cx="-1" cy="-2" r="1.2" fill="white" />
-            </g>
-          </g>
-          
-          {/* Hair Styling */}
-          <path d="M70 70 Q70 30 100 30 Q130 30 130 70 Q130 50 115 45 Q100 40 85 45 Q70 50 70 70" fill="#1e1b4b" />
-        </g>
-
-        {/* SKELETAL SYSTEM - Viewer's Right (Avatar's Left) */}
-        <g transform="translate(145, 150)">
-          <g style={{ transform: currentPose.leftUpperArm, transformOrigin: '0 0', transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
-            <rect x="-8" y="0" width="16" height="45" rx="8" fill="#3f37c9" />
-            <g transform="translate(0, 45)">
-              <g style={{ transform: currentPose.leftLowerArm, transformOrigin: '0 0', transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
-                <rect x="-7" y="0" width="14" height="40" rx="7" fill="#ffdbac" />
-                <g transform="translate(0, 40)">
-                  <g style={{ transform: currentPose.leftHand, transformOrigin: '0 0', transition: 'all 0.4s ease-out' }}>
-                    {renderHand(currentPose.handState, '#ffdbac', true)}
-                  </g>
-                </g>
-              </g>
-            </g>
-          </g>
-        </g>
-
-        {/* SKELETAL SYSTEM - Viewer's Left (Avatar's Right) */}
-        <g transform="translate(55, 150)">
-          <g style={{ transform: currentPose.rightUpperArm, transformOrigin: '0 0', transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
-            <rect x="-8" y="0" width="16" height="45" rx="8" fill="#3f37c9" />
-            <g transform="translate(0, 45)">
-              <g style={{ transform: currentPose.rightLowerArm, transformOrigin: '0 0', transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
-                <rect x="-7" y="0" width="14" height="40" rx="7" fill="#ffdbac" />
-                <g transform="translate(0, 40)">
-                  <g style={{ transform: currentPose.rightHand, transformOrigin: '0 0', transition: 'all 0.4s ease-out' }}>
-                    {renderHand(currentPose.handState, '#ffdbac', false)}
-                  </g>
-                </g>
-              </g>
-            </g>
-          </g>
-        </g>
-      </svg>
+  // 3. GENERIC BONE COMPONENT (The Secret Sauce for Non-Deformed Joints)
+  // Renders a joint circle at 0,0 and the bone extending downwards
+  const Bone = ({ w, len, color, children, zIndex = 1 }: any) => (
+    <div style={{ 
+      position: 'absolute', top: 0, left: 0, 
+      width: 0, height: 0, // Pivot point container has no size
+      zIndex 
+    }}>
+      {/* The Visual Joint (Centered at pivot) */}
+      <div style={{
+        position: 'absolute', top: -w/2, left: -w/2,
+        width: w, height: w,
+        borderRadius: '50%',
+        background: color,
+        boxShadow: 'inset 0 0 10px rgba(0,0,0,0.1)' // subtle depth
+      }} />
       
-      <div className="absolute top-4 left-4 flex items-center gap-2">
-        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-        <span className="text-[10px] font-bold text-indigo-300 tracking-wider">TSL LIVE RENDER</span>
+      {/* The Bone Shaft */}
+      <div style={{
+        position: 'absolute', top: 0, left: -w/2,
+        width: w, height: len,
+        background: color,
+        borderRadius: w/2,
+        // Using a gradient helps distinguish overlapping limbs of same color
+        backgroundImage: 'linear-gradient(90deg, rgba(0,0,0,0.05) 0%, transparent 50%, rgba(0,0,0,0.05) 100%)'
+      }} />
+
+      {/* Connection Point for next bone */}
+      <div style={{ position: 'absolute', top: len, left: 0 }}>
+        {children}
       </div>
+    </div>
+  );
+
+  return (
+    <div className="w-full h-full flex items-center justify-center bg-blue-50/50 rounded-[50px] overflow-hidden relative">
+      {/* SCENE CONTAINER */}
+      <div style={{
+        perspective: '1200px', // More natural orthographic-like perspective
+        width: '100%', height: '100%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transform: 'translateY(50px)' // Center the figure vertically
+      }}>
+        
+        {/* ROOT: CENTER OF TORSO */}
+        <div style={{
+          position: 'relative', width: SIZES.torso.w, height: SIZES.torso.h,
+          transformStyle: 'preserve-3d',
+          background: COLORS.shirt,
+          borderRadius: '30px 30px 20px 20px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.15)'
+        }}>
+          {/* Shirt Details */}
+          <div style={{ position: 'absolute', top: 0, width: '100%', height: '100%', borderRadius: '30px 30px 20px 20px', overflow: 'hidden' }}>
+             <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 60, height: 20, background: 'rgba(0,0,0,0.2)', borderRadius: '0 0 30px 30px' }} /> {/* Collar Shadow */}
+             <div style={{ position: 'absolute', bottom: 0, width: '100%', height: 10, background: 'rgba(0,0,0,0.2)' }} /> {/* Hem */}
+          </div>
+
+          {/* NECK (Anchored Top Center) */}
+          <div style={{ position: 'absolute', top: -15, left: '50%', transform: 'translateX(-50%)', zIndex: 5 }}>
+             <div style={{ width: SIZES.neck.w, height: SIZES.neck.h, background: COLORS.skin, borderRadius: 15 }} />
+             
+             {/* HEAD (Child of Neck) */}
+             <div style={{
+               position: 'absolute', top: -SIZES.head.h + 10, left: -(SIZES.head.w - SIZES.neck.w)/2,
+               width: SIZES.head.w, height: SIZES.head.h,
+               transform: getRot(currentPose.head),
+               transformOrigin: 'bottom center',
+               transformStyle: 'preserve-3d',
+               transition: 'transform 0.4s ease-out'
+             }}>
+                <Face />
+             </div>
+          </div>
+
+          {/* RIGHT SHOULDER (Viewer's Left) */}
+          <div style={{ position: 'absolute', top: 15, left: 15, zIndex: 10 }}>
+            {/* Upper Arm Container - Rotates around shoulder */}
+            <div style={{ transform: getRot(currentPose.rightUpperArm), transformOrigin: 'top center', transition: 'transform 0.4s ease-out', transformStyle: 'preserve-3d' }}>
+              <Bone w={SIZES.upperArm.w} len={SIZES.upperArm.len} color={COLORS.shirtLight}>
+                
+                {/* Elbow Container - Rotates around elbow */}
+                <div style={{ transform: getRot(currentPose.rightLowerArm), transformOrigin: 'top center', transition: 'transform 0.4s ease-out', transformStyle: 'preserve-3d' }}>
+                  {/* Skin Transition at elbow */}
+                  <div style={{ position: 'absolute', top: -10, left: -14, width: 28, height: 20, background: COLORS.skin, borderRadius: '50%', zIndex: -1 }} />
+                  
+                  <Bone w={SIZES.lowerArm.w} len={SIZES.lowerArm.len} color={COLORS.skin}>
+                     
+                     {/* Wrist/Hand */}
+                     <div style={{ transform: getRot(currentPose.rightHand), transformOrigin: 'top center', transition: 'transform 0.4s ease-out' }}>
+                        <div style={{ position: 'absolute', top: 0, left: -SIZES.hand.w/2 }}>
+                          <VectorHand state={currentPose.handState} isLeft={false} />
+                        </div>
+                     </div>
+
+                  </Bone>
+                </div>
+
+              </Bone>
+            </div>
+          </div>
+
+          {/* LEFT SHOULDER (Viewer's Right) */}
+          <div style={{ position: 'absolute', top: 15, right: 15, zIndex: 10 }}>
+            <div style={{ transform: getRot(currentPose.leftUpperArm), transformOrigin: 'top center', transition: 'transform 0.4s ease-out', transformStyle: 'preserve-3d' }}>
+              <Bone w={SIZES.upperArm.w} len={SIZES.upperArm.len} color={COLORS.shirtLight}>
+                
+                <div style={{ transform: getRot(currentPose.leftLowerArm), transformOrigin: 'top center', transition: 'transform 0.4s ease-out', transformStyle: 'preserve-3d' }}>
+                  {/* Skin Transition */}
+                  <div style={{ position: 'absolute', top: -10, left: -14, width: 28, height: 20, background: COLORS.skin, borderRadius: '50%', zIndex: -1 }} />
+
+                  <Bone w={SIZES.lowerArm.w} len={SIZES.lowerArm.len} color={COLORS.skin}>
+                     
+                     <div style={{ transform: getRot(currentPose.leftHand), transformOrigin: 'top center', transition: 'transform 0.4s ease-out' }}>
+                        <div style={{ position: 'absolute', top: 0, left: -SIZES.hand.w/2 }}>
+                           <VectorHand state={currentPose.handState} isLeft={true} />
+                        </div>
+                     </div>
+
+                  </Bone>
+                </div>
+
+              </Bone>
+            </div>
+          </div>
+
+        </div>
+        {/* End Torso */}
+
+      </div>
+      
+      {/* Ground Shadow */}
+      <div className="absolute bottom-10 w-40 h-6 bg-indigo-900/10 blur-xl rounded-full" />
     </div>
   );
 };

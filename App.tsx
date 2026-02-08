@@ -1,304 +1,161 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
-import { UI_STRINGS, DEFAULT_POSE } from './constants';
-import { ChatMessage, SignPose, SignAction } from './types';
-import Avatar from './components/Avatar';
-import { translateToSigns } from './services/gemini';
+import React, { useState } from 'react';
+import { UI_STRINGS } from './constants';
+import { User } from './types';
+import Translator from './components/Translator';
+import Home from './components/Home';
+import Guide from './components/Guide';
+import Auth from './components/Auth';
+import Profile from './components/Profile';
+import QuickMessages from './components/QuickMessages';
 
-function encode(bytes: Uint8Array) {
-  let binary = '';
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
+type View = 'home' | 'translator' | 'guide' | 'auth' | 'profile' | 'quick';
 
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const [currentPose, setCurrentPose] = useState<SignPose>(DEFAULT_POSE);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [liveTranscript, setLiveTranscript] = useState<string>("");
-  const [connectionStatus, setConnectionStatus] = useState<string>("");
-  
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const sessionRef = useRef<any>(null);
-  const transcriptionBuffer = useRef<string>("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [currentView, setCurrentView] = useState<View>('home');
+  const [user, setUser] = useState<User | null>(null);
 
-  const animationQueue = useRef<SignAction[]>([]);
-  const isAnimating = useRef(false);
+  const handleLogin = (loggedInUser: User) => {
+    setUser(loggedInUser);
+    setCurrentView('translator');
+  };
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, liveTranscript, isProcessing]);
+  const handleLogout = () => {
+    setUser(null);
+    setCurrentView('home');
+  };
 
-  const processAnimationQueue = useCallback(async () => {
-    if (isAnimating.current || animationQueue.current.length === 0) return;
-    
-    isAnimating.current = true;
-    while (animationQueue.current.length > 0) {
-      const action = animationQueue.current.shift();
-      if (action) {
-        setCurrentPose(action.pose);
-        await new Promise(resolve => setTimeout(resolve, action.duration));
-      }
-    }
-    setCurrentPose(DEFAULT_POSE);
-    isAnimating.current = false;
-  }, []);
+  const handleUserUpdate = (updated: User) => {
+    setUser(updated);
+  };
 
-  const handleSpeechResult = async (text: string) => {
-    const cleanText = text.trim();
-    if (!cleanText || cleanText.length < 2) return;
-    
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: cleanText }]);
-    setLiveTranscript("");
-    setIsProcessing(true);
-    
-    try {
-      const signs = await translateToSigns(cleanText);
-      if (signs && signs.length > 0) {
-        // Clear queue if new speech arrives to stay relevant? 
-        // For now, append for multi-sentence support
-        animationQueue.current = [...animationQueue.current, ...signs];
-        processAnimationQueue();
-      }
-    } catch (e) {
-      console.error("Sign translation failed", e);
-    } finally {
-      setIsProcessing(false);
+  const navigateTo = (view: View) => {
+    if ((view === 'translator' || view === 'profile') && !user) {
+      setCurrentView('auth');
+    } else {
+      setCurrentView(view);
     }
   };
 
-  const stopListening = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
-      }
-      audioContextRef.current = null;
-    }
-    if (sessionRef.current) {
-      sessionRef.current = null;
-    }
-    setIsRecording(false);
-    setConnectionStatus("");
-    setLiveTranscript("");
-    transcriptionBuffer.current = "";
-  };
-
-  const startListening = async () => {
-    try {
-      setError(null);
-      setConnectionStatus("قاعد نتصل...");
-      transcriptionBuffer.current = "";
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      audioContextRef.current = audioCtx;
-
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        callbacks: {
-          onopen: () => {
-            setConnectionStatus(UI_STRINGS.LISTENING_STATUS);
-            setIsRecording(true);
-            
-            const source = audioCtx.createMediaStreamSource(stream);
-            const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-            
-            processor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                int16[i] = inputData[i] * 32768;
-              }
-              const pcmBlob: Blob = {
-                data: encode(new Uint8Array(int16.buffer)),
-                mimeType: 'audio/pcm;rate=16000',
-              };
-              
-              sessionPromise.then(session => {
-                session.sendRealtimeInput({ media: pcmBlob });
-              }).catch(() => {});
-            };
-            
-            source.connect(processor);
-            processor.connect(audioCtx.destination);
-          },
-          onmessage: (message: LiveServerMessage) => {
-            if (message.serverContent?.inputTranscription) {
-              const text = message.serverContent.inputTranscription.text;
-              transcriptionBuffer.current += text;
-              setLiveTranscript(transcriptionBuffer.current);
-            }
-
-            if (message.serverContent?.turnComplete) {
-              const fullText = transcriptionBuffer.current;
-              transcriptionBuffer.current = "";
-              if (fullText.trim()) {
-                handleSpeechResult(fullText);
-              }
-            }
-          },
-          onerror: (e) => {
-            console.error("Live API Error", e);
-            setError(UI_STRINGS.ERROR_MIC);
-            stopListening();
-          },
-          onclose: () => {
-            setIsRecording(false);
-            setConnectionStatus("");
-          }
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: {},
-          systemInstruction: "You are a specialized Tunisian Darija speech-to-text engine. Output accurate transcriptions of Tunisian dialect. Ignore background noise. No audio output."
-        }
-      });
-
-      sessionRef.current = await sessionPromise;
-    } catch (err) {
-      console.error("Start listening error", err);
-      setError(UI_STRINGS.ERROR_MIC);
-      setConnectionStatus("");
-    }
-  };
+  // Nav Button Component for consistency
+  const NavBtn = ({ view, label, icon, urgent = false }: { view: View, label: string, icon: React.ReactNode, urgent?: boolean }) => (
+    <button 
+      onClick={() => navigateTo(view)} 
+      className={`flex flex-col md:flex-row items-center gap-2 transition-all duration-300 p-2 rounded-xl group ${
+        urgent 
+          ? (currentView === view ? 'bg-red-500 text-white shadow-lg shadow-red-200' : 'bg-red-50 text-red-500 hover:bg-red-100')
+          : (currentView === view ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-50')
+      }`}
+      aria-label={label}
+    >
+      <div className={`w-8 h-8 md:w-6 md:h-6 transition-transform group-hover:scale-110 ${currentView === view ? 'scale-110' : ''}`}>
+        {icon}
+      </div>
+      <span className={`text-xs md:text-base font-bold hidden md:block ${urgent ? '' : ''}`}>{label}</span>
+    </button>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center p-4 md:p-8">
-      <header className="w-full max-w-2xl mb-8 text-center">
-        <h1 className="text-4xl font-bold text-indigo-700 mb-2 flex items-center justify-center gap-2">
-          <span>{UI_STRINGS.APP_TITLE}</span>
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-          </svg>
-        </h1>
-        <p className="text-slate-500 text-lg">{UI_STRINGS.APP_SUBTITLE}</p>
-      </header>
+    <div className="min-h-screen bg-slate-50 flex flex-col font-['Tajawal'] overflow-x-hidden">
+      
+      {/* Navigation */}
+      <nav className="w-full px-4 py-4 md:py-6 flex justify-center sticky top-0 z-40">
+        <div className="bg-white/90 backdrop-blur-xl shadow-2xl rounded-[30px] px-4 md:px-8 py-3 flex items-center justify-between gap-2 md:gap-8 border border-white max-w-6xl w-full transition-all">
+           
+           {/* Logo Area */}
+           <div 
+             className="flex items-center gap-3 cursor-pointer select-none" 
+             onClick={() => navigateTo('home')}
+           >
+             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+             </div>
+             <div className="hidden sm:block font-black text-2xl text-indigo-950 tracking-tighter">
+               تواصل
+             </div>
+           </div>
+           
+           {/* Center Links with Icons */}
+           <div className="flex gap-1 md:gap-2">
+             <NavBtn 
+               view="home" 
+               label={UI_STRINGS.NAV_HOME} 
+               icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>} 
+             />
+             <NavBtn 
+               view="quick" 
+               label={UI_STRINGS.NAV_QUICK} 
+               urgent={true}
+               icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>} 
+             />
+             <NavBtn 
+               view="guide" 
+               label={UI_STRINGS.NAV_GUIDE} 
+               icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>} 
+             />
+             <NavBtn 
+               view="translator" 
+               label={UI_STRINGS.NAV_TRANSLATOR} 
+               icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>} 
+             />
+             {user && (
+               <NavBtn 
+                 view="profile" 
+                 label={UI_STRINGS.NAV_PROFILE} 
+                 icon={<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>} 
+               />
+             )}
+           </div>
 
-      <main className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
-        <section className="flex flex-col space-y-6">
-          <div className="bg-white rounded-3xl p-6 shadow-2xl border border-indigo-50 flex-1 flex flex-col min-h-[450px]">
-            <h2 className="text-xl font-bold mb-4 text-indigo-900 text-right">لغة الإشارة التونسية</h2>
-            
-            <Avatar currentPose={currentPose} />
-            
-            <div className="mt-8 flex flex-col items-center space-y-4">
-              {isRecording && (
-                <div className="flex gap-1 h-8 items-center">
-                  {[...Array(6)].map((_, i) => (
-                    <div 
-                      key={i} 
-                      className="w-1.5 bg-indigo-500 rounded-full animate-pulse" 
-                      style={{ height: `${25 + Math.random() * 65}%`, animationDelay: `${i * 0.12}s` }}
-                    ></div>
-                  ))}
-                </div>
-              )}
+           {/* Auth Actions */}
+           <div className="flex items-center gap-4">
+             {user ? (
+               <div className="flex items-center gap-2">
+                 {user.photo && (
+                   <img src={user.photo} alt="User" className="w-10 h-10 rounded-full object-cover border-2 border-indigo-100 hidden sm:block shadow-sm" />
+                 )}
+                 <button 
+                   onClick={handleLogout} 
+                   className="bg-red-50 text-red-500 w-10 h-10 rounded-full flex items-center justify-center hover:bg-red-100 transition shadow-sm"
+                   aria-label={UI_STRINGS.NAV_LOGOUT}
+                 >
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                 </button>
+               </div>
+             ) : (
+               <button 
+                 onClick={() => setCurrentView('auth')} 
+                 className="bg-indigo-600 text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200 text-sm flex items-center gap-2"
+               >
+                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" /></svg>
+                 <span className="hidden sm:inline">{UI_STRINGS.NAV_LOGIN}</span>
+               </button>
+             )}
+           </div>
+        </div>
+      </nav>
 
-              <button
-                onClick={isRecording ? stopListening : startListening}
-                disabled={isProcessing}
-                className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-xl ${
-                  isRecording 
-                    ? 'bg-red-500 hover:bg-red-600' 
-                    : 'bg-indigo-600 hover:bg-indigo-700'
-                } disabled:opacity-50`}
-              >
-                {isRecording ? (
-                  <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                ) : (
-                  <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                )}
-              </button>
-              
-              <div className="text-center w-full px-4">
-                <p className={`text-lg font-bold ${isRecording ? 'text-red-500' : 'text-indigo-600'}`}>
-                  {connectionStatus || UI_STRINGS.START_LISTENING}
-                </p>
-                {liveTranscript && (
-                  <div className="mt-2 text-indigo-500 italic text-sm p-3 bg-indigo-50 rounded-xl animate-pulse inline-block max-w-full border border-indigo-100">
-                    "{liveTranscript}"
-                  </div>
-                )}
-              </div>
-            </div>
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col items-center p-4 md:p-8 w-full">
+        {currentView === 'home' && <Home onNavigate={navigateTo} />}
+        {currentView === 'guide' && <Guide />}
+        {currentView === 'auth' && <Auth onLogin={handleLogin} />}
+        {currentView === 'quick' && <QuickMessages />}
+        {currentView === 'translator' && user && <Translator />}
+        {currentView === 'profile' && user && <Profile user={user} onUpdate={handleUserUpdate} />}
+        
+        {/* Fallback for protected routes if accessed while logged out (though navigateTo handles most) */}
+        {(currentView === 'translator' || currentView === 'profile') && !user && (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
+             <div className="w-12 h-12 border-4 border-slate-200 border-t-indigo-500 rounded-full animate-spin"></div>
+             <p>Loading...</p>
           </div>
-          
-          {error && (
-            <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-center font-bold">
-              {error}
-            </div>
-          )}
-        </section>
-
-        <section className="bg-white rounded-3xl p-6 shadow-2xl border border-indigo-50 flex flex-col h-[650px]">
-          <h2 className="text-xl font-bold mb-4 text-indigo-900 text-right border-b pb-2">المحادثة</h2>
-          
-          <div className="flex-1 overflow-y-auto space-y-4 px-2 py-4 scroll-smooth custom-scrollbar">
-            {messages.length === 0 && !isProcessing && (
-              <div className="text-center text-slate-400 py-24 flex flex-col items-center">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
-                  <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                  </svg>
-                </div>
-                <p className="text-base px-8 leading-relaxed">{UI_STRINGS.WELCOME_MSG}</p>
-              </div>
-            )}
-            
-            {messages.map((msg) => (
-              <div 
-                key={msg.id} 
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
-              >
-                <div className={`max-w-[85%] p-4 rounded-3xl shadow-sm ${
-                  msg.role === 'user' 
-                    ? 'bg-indigo-600 text-white rounded-tr-none' 
-                    : 'bg-slate-100 text-slate-800 rounded-tl-none border border-slate-200'
-                }`}>
-                  <p className="text-base leading-relaxed">{msg.text}</p>
-                </div>
-              </div>
-            ))}
-            
-            {isProcessing && (
-              <div className="flex justify-start">
-                <div className="bg-indigo-50 text-indigo-700 p-4 rounded-3xl rounded-tl-none flex items-center gap-3 border border-indigo-100">
-                  <div className="flex gap-1.5">
-                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-.3s]"></div>
-                    <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce [animation-delay:-.5s]"></div>
-                  </div>
-                  <span className="text-sm font-bold">{UI_STRINGS.TRANSLATING}</span>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-        </section>
+        )}
       </main>
 
-      <footer className="mt-12 text-center text-slate-400 text-xs py-6 border-t w-full max-w-5xl">
-        <p className="font-medium">تواصل - أول تطبيق تونسي لترجمة لغة الإشارة</p>
-        <p className="mt-1 opacity-60">صُنع لخدمة الإدماج والتواصل الفعّال</p>
+      <footer className="w-full text-center py-8 text-slate-400 text-sm font-black opacity-30 uppercase tracking-[0.2em] flex flex-col items-center gap-2">
+        <svg className="w-6 h-6 opacity-50" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+        <span>Tawsil • Tunisian Accessibility Project</span>
       </footer>
     </div>
   );

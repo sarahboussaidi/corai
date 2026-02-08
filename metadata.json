@@ -1,6 +1,6 @@
 {
-  "name": "Tawsil - Tunisian Sign Language",
-  "description": "An app that bridges communication between mute and speaking people in Tunisia by converting Darija speech into Tunisian Sign Language (TSL) displayed through an animated avatar.",
+  "name": "Twasol",
+  "description": "An app that bridges communication between mute and speaking people in Tunisia by converting Darija speech into Tunisian Sign Language (TSL) and recognizing signs from video.",
   "requestFramePermissions": [
     "microphone",
     "camera"
