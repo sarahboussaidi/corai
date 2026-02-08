@@ -320,7 +320,10 @@ const Translator: React.FC = () => {
         setVolumeLevel(Math.min(100, average * 3));
 
         if (average > 5) { 
-          isSpeakingRef.current = true;
+          if (!isSpeakingRef.current) {
+            isSpeakingRef.current = true;
+            setIsProcessing(true); // Show 'قاعد نترجم...'
+          }
           setLiveTranscript("نسمع فيك...");
           if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
         } else {
@@ -328,6 +331,7 @@ const Translator: React.FC = () => {
             silenceTimerRef.current = setTimeout(() => {
               isSpeakingRef.current = false;
               setLiveTranscript("...");
+              setIsProcessing(false); // Back to 'مستعد'
               stopRecordingAndTranscribe();
             }, 1000); 
           }

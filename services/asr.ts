@@ -1,9 +1,7 @@
 
-const HF_MODEL_URL = "https://api-inference.huggingface.co/models/SalahZa/Tunisian_Automatic_Speech_Recognition";
 
-// Helper to handle the proxy call to backend for ASR
-const queryHuggingFace = async (audioBlob: Blob): Promise<any> => {
-
+// Use backend proxy for ASR
+export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
   // Convert audioBlob to base64 and get type
   const base64Audio = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -16,7 +14,7 @@ const queryHuggingFace = async (audioBlob: Blob): Promise<any> => {
   });
   const audioType = audioBlob.type;
 
-  const response = await fetch("http://localhost:5000/asr", {
+  const response = await fetch("http://localhost:5050/asr", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -26,19 +24,9 @@ const queryHuggingFace = async (audioBlob: Blob): Promise<any> => {
 
   if (!response.ok) {
     const errText = await response.text();
-    console.error("Proxy ASR Error:", errText);
-    throw new Error(`PROXY_ERROR_${response.status}`);
+    throw new Error(`ASR Proxy Error: ${errText}`);
   }
 
-  return await response.json();
-};
-
-export const transcribeAudio = async (audioBlob: Blob): Promise<string> => {
-  try {
-    const result = await queryHuggingFace(audioBlob);
-    return result.text || "";
-  } catch (error: any) {
-    console.error("ASR Failed:", error);
-    throw error;
-  }
+  const result = await response.json();
+  return result.text || "";
 };
